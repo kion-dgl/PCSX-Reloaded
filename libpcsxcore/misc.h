@@ -65,9 +65,11 @@ int LoadLdrFile(const char *LdrPath);
 int SaveState(const char *file);
 int SaveStateMem(const u32 id);
 int SaveStateGz(gzFile f, long* gzsize);
+int SaveStateFile(gzFile f, long* gzsize);
 int LoadState(const char *file);
 int LoadStateMem(const u32 id);
 int LoadStateGz(gzFile f);
+int LoadStateFile(gzFile f);
 int CheckState(const char *file);
 
 int SendPcsxInfo();

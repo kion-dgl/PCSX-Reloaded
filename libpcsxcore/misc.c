@@ -625,7 +625,7 @@ int SaveState(const char *file) {
 
 	f = gzopen(file, "wb9"); // Best ratio but slow
 	if (f == NULL) return -1;
-	return SaveStateGz(f, &size);
+	return SaveStateFile(f, &size);
 }
 
 int LoadState(const char *file) {
@@ -633,8 +633,9 @@ int LoadState(const char *file) {
 
 	f = gzopen(file, "rb");
 	if (f == NULL) return -1;
-	return LoadStateGz(f);
+	return LoadStateFile(f);
 }
+
 
 u32 mem_cur_save_count=0, mem_last_save;
 boolean mem_wrapped=FALSE; // Whether we went past max count and restarted counting
@@ -752,6 +753,120 @@ int SaveStateMem(const u32 id) {return 0;}
 int LoadStateMem(const u32 id) {return 0;}
 void CleanupMemSaveStates() {}
 #endif
+
+int SaveStateFile(gzFile f, long* gzsize) {
+	int Size;
+	unsigned char pMemGpuPic[SZ_GPUPIC];
+
+	//if (f == NULL) return -1;
+
+	gzwrite(f, (void *)PcsxrHeader, sizeof(PcsxrHeader));
+	gzwrite(f, (void *)&SaveVersion, sizeof(u32));
+	gzwrite(f, (void *)&Config.HLE, sizeof(boolean));
+
+	if (gzsize)GPU_getScreenPic(pMemGpuPic); // Not necessary with ephemeral saves
+	gzwrite(f, pMemGpuPic, SZ_GPUPIC);
+
+	if (Config.HLE)
+		psxBiosFreeze(1);
+
+	gzwrite(f, psxM, 0x00200000);
+	gzwrite(f, psxR, 0x00080000);
+	gzwrite(f, psxH, 0x00010000);
+	gzwrite(f, (void *)&psxRegs, sizeof(psxRegs));
+
+	// gpu
+	if (!gpufP)gpufP = (GPUFreeze_t *)malloc(sizeof(GPUFreeze_t));
+	gpufP->ulFreezeVersion = 1;
+	GPU_freeze(1, gpufP);
+	gzwrite(f, gpufP, sizeof(GPUFreeze_t));
+
+	// SPU Plugin cannot change during run, so we query size info just once per session
+	if (!spufP) {
+		spufP = (SPUFreeze_t *)malloc(offsetof(SPUFreeze_t, SPUPorts)); // only first 3 elements (up to Size)        
+		SPU_freeze(2, spufP);
+		Size = spufP->Size;
+		SysPrintf("SPUFreezeSize %i/(%i)\n", Size, offsetof(SPUFreeze_t, SPUPorts));
+		free(spufP);
+		spufP = (SPUFreeze_t *) malloc(Size);
+		spufP->Size = Size;
+
+		if (spufP->Size <= 0) {
+			gzclose(f);
+			free(spufP);
+			spufP = NULL;
+			return 1; // error
+		}
+	}
+	// spu
+	gzwrite(f, &(spufP->Size), 4);
+	SPU_freeze(1, spufP);
+	gzwrite(f, spufP, spufP->Size);
+
+	sioFreeze(f, 1);
+	cdrFreeze(f, 1);
+	psxHwFreeze(f, 1);
+	psxRcntFreeze(f, 1);
+	mdecFreeze(f, 1);
+
+	if(gzsize)*gzsize = gztell(f);
+	gzclose(f);
+
+	return 0;
+}
+
+int LoadStateFile(gzFile f) {
+	SPUFreeze_t *_spufP;
+	int Size;
+	char header[sizeof(PcsxrHeader)];
+	u32 version;
+	boolean hle;
+
+	if (f == NULL) return -1;
+
+	gzread(f, header, sizeof(header));
+	gzread(f, &version, sizeof(u32));
+	gzread(f, &hle, sizeof(boolean));
+
+	// Compare header only "STv4 PCSXR" part no version
+	if (strncmp(PcsxrHeader, header, PCSXR_HEADER_SZ) != 0 || version != SaveVersion || hle != Config.HLE) {
+		gzclose(f);
+		return -1;
+	}
+
+	psxCpu->Reset();
+	gzseek(f, SZ_GPUPIC, SEEK_CUR);
+
+	gzread(f, psxM, 0x00200000);
+	gzread(f, psxR, 0x00080000);
+	gzread(f, psxH, 0x00010000);
+	gzread(f, (void *)&psxRegs, sizeof(psxRegs));
+
+	if (Config.HLE)
+		psxBiosFreeze(0);
+
+	// gpu
+	if (!gpufP)gpufP = (GPUFreeze_t *)malloc(sizeof(GPUFreeze_t));
+	gzread(f, gpufP, sizeof(GPUFreeze_t));
+	GPU_freeze(0, gpufP);
+
+	// spu
+	gzread(f, &Size, 4);
+	_spufP = (SPUFreeze_t *)malloc(Size);
+	gzread(f, _spufP, Size);
+	SPU_freeze(0, _spufP);
+	free(_spufP);
+
+	sioFreeze(f, 0);
+	cdrFreeze(f, 0);
+	psxHwFreeze(f, 0);
+	psxRcntFreeze(f, 0);
+	mdecFreeze(f, 0);
+
+	gzclose(f);
+
+	return 0;
+}
 
 int SaveStateGz(gzFile f, long* gzsize) {
 	int Size;
