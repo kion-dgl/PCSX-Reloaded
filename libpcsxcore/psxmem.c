@@ -57,6 +57,8 @@ u8 **psxMemRLUT = NULL;
 0xbfc0_0000-0xbfc7_ffff		BIOS Mirror (512K) Uncached
 */
 
+int kionLog = 0;
+
 int psxMemInit() {
 	int i;
 
@@ -162,6 +164,10 @@ u8 psxMemRead8(u32 mem) {
 
 	psxRegs.cycle += 0;
 
+	if(mem == 0x80195C08 || mem == 0x000195c08) {
+		printf("u8\n");
+	}
+
 
 	t = mem >> 16;
 	if (t == 0x1f80 || t == 0x9f80 || t == 0xbf80) {
@@ -191,7 +197,11 @@ u16 psxMemRead16(u32 mem) {
 
 	psxRegs.cycle += 1;
 
-	
+	if(mem == 0x80195C08 || mem == 0x000195c08) {
+		printf("u16\n");
+	}
+
+
 	t = mem >> 16;
 	if (t == 0x1f80 || t == 0x9f80 || t == 0xbf80) {
 		if ((mem & 0xffff) < 0x400)
@@ -216,27 +226,49 @@ u16 psxMemRead16(u32 mem) {
 u32 psxMemRead32(u32 mem) {
 	char *p;
 	u32 t;
-
+	u32 log, km;
+	log = 0;
 
 	psxRegs.cycle += 1;
+		
+	if(mem == 0x80195C08 || mem == 0x000195c08) {
+		log = 1;
+		printf("u32 0x%08x\n", mem);
+	}
 
-	
 	t = mem >> 16;
 	if (t == 0x1f80 || t == 0x9f80 || t == 0xbf80) {
-		if ((mem & 0xffff) < 0x400)
+		if ((mem & 0xffff) < 0x400) {
+			if(log) printf("a\n");
 			return psxHu32(mem);
-		else
+		}
+		else {
+			if(log) printf("b\n");
 			return psxHwRead32(mem);
+		}
 	} else {
+		if(log) printf("c\n");
+
 		p = (char *)(psxMemRLUT[t]);
+
 		if (p != NULL) {
-			if (Config.Debug)
+
+			if (Config.Debug) {
 				DebugCheckBP((mem & 0xffffff) | 0x80000000, BR4);
-			return SWAPu32(*(u32 *)(p + (mem & 0xffff)));
+			}
+			
+			km = SWAPu32(*(u32 *)(p + (mem & 0xffff)));
+
+			if(log) printf("val: 0x%08x\n", km);
+
+			return km;
+
 		} else {
+
 #ifdef PSXMEM_LOG
 			if (writeok) { PSXMEM_LOG("err lw %8.8lx\n", mem); }
 #endif
+
 			return 0;
 		}
 	}
